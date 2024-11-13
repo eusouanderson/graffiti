@@ -1,117 +1,128 @@
 <template>
-  <div
-    ref="canvasContainer"
-    @mousemove="handleMouseMove"
-    @click="handleClick"
-    class="spray-container"
-  >
-    <canvas ref="canvas" width="500" height="500"></canvas>
+  <div class="particle-menu">
+    <input type="range" id="sizeSlider" min="0.01" max="0.2" step="0.01" v-model="particleSize" @input="updateSize" />
+    <label for="sizeSlider">Tamanho do Spray</label>
+    <input type="color" v-model="particleColor" @input="updateColor" />
+    <label for="colorPicker">Cor</label>
   </div>
+
+  <div ref="container" class="particle-container" @mousedown="startSpray" @mouseup="stopSpray" @mousemove="createSpray"></div>
 </template>
 
 <script>
+import * as THREE from 'three';
+
 export default {
+  name: 'AppParticles',
+  mounted() {
+    this.initScene();
+    window.addEventListener('resize', this.handleResize);
+  },
+  unmounted() {
+    window.removeEventListener('resize', this.handleResize);
+  },
   data() {
     return {
-      ctx: null,
-      particles: [], // Armazena as partículas
+      spraying: false, // Controla se estamos no modo de spray
+      mouseX: 0, // Posição X do mouse no espaço 2D
+      mouseY: 0, // Posição Y do mouse no espaço 2D
+      particleSize: 0.05, // Tamanho inicial das partículas
+      particleColor: '#ff0000', // Cor inicial das partículas
+      activeParticles: [] // Array para armazenar partículas ativas
     };
   },
-  mounted() {
-    this.ctx = this.$refs.canvas.getContext('2d');
-    this.startAnimation();
-  },
   methods: {
-    handleMouseMove() {
-      // Deixamos esse método vazio já que não está sendo usado, mas pode ser customizado se necessário.
-    },
-    handleClick(event) {
-      const x = event.offsetX;
-      const y = event.offsetY;
+    initScene() {
+      // Criar a cena, câmera e renderizador
+      this.scene = new THREE.Scene();
+      this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      this.renderer = new THREE.WebGLRenderer({ alpha: true });
+      this.renderer.setSize(window.innerWidth, window.innerHeight);
+      this.$refs.container.appendChild(this.renderer.domElement);
 
-      // Gerar partículas no ponto clicado
-      this.createParticles(x, y);
-    },
-    createParticles(x, y) {
-      const particleCount = 30; // Quantidade de partículas geradas no clique
-      console.log(`Gerando ${particleCount} partículas em (${x}, ${y})`);  // Log para debug
+      // Criar o grupo de partículas
+      this.particles = new THREE.Group();
+      this.scene.add(this.particles);
 
-      // Gerar partículas
+      // Posição inicial da câmera
+      this.camera.position.z = 5;
+
+      // Iniciar animação
+      this.animate();
+    },
+
+    startSpray(event) {
+      this.spraying = true;
+      this.createSpray(event); // Cria partículas imediatamente quando o botão é pressionado
+    },
+
+    stopSpray() {
+      this.spraying = false;
+    },
+
+    createSpray(event) {
+      if (!this.spraying) return;
+
+      // Atualizar as posições do mouse
+      this.mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+      this.mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+
+      // Usar a posição do mouse diretamente no espaço 3D
+      const mouse = new THREE.Vector2(this.mouseX, this.mouseY);
+
+      const mousePosition = new THREE.Vector3(mouse.x , mouse.y + 0.1, 0.5); // Z ajustado para um valor médio
+      mousePosition.unproject(this.camera); // Converte para coordenadas no mundo 3D
+
+      // Criar partículas com esferas
+      const particleCount = 1;
+      const material = new THREE.MeshBasicMaterial({ color: this.particleColor });
+
       for (let i = 0; i < particleCount; i++) {
-        const angle = Math.random() * Math.PI * 2;  // Aleatório em todas as direções
-        const speed = Math.random() * 3 + 2;  // Velocidade variada
-        const size = Math.random() * 3 + 2;   // Tamanho variado
-        const opacity = 1;  // Começam com opacidade total
-
-        // Partícula com velocidade para baixo (efeito de gravidade)
-        const particle = {
-          x,
-          y,
-          angle,
-          speed,
-          size,
-          opacity,
-          gravity: 0.1, // Efeito gravitacional
-          lifetime: 100, // Vida útil da partícula (em ciclos de animação)
-        };
-
-        this.particles.push(particle);
-
-        // Log para verificar os dados da partícula
-        console.log('Partícula criada:', particle);
+        const geometry = new THREE.SphereGeometry(this.particleSize); // Usar o tamanho do spray configurado
+        const sphere = new THREE.Mesh(geometry, material);
+        
+        // Posicionar a esfera em torno da posição do mouse
+        sphere.position.set(
+          mousePosition.x + Math.random() * 0.01 - 0.01,
+          mousePosition.y + Math.random() * 0.01 - 0.01,
+          mousePosition.z + Math.random() * 0.01 - 0.01
+        );
+        
+        // Adicionar a esfera ao grupo de partículas e à lista de partículas ativas
+        this.particles.add(sphere);
+        this.activeParticles.push(sphere);
       }
     },
-    startAnimation() {
-      const animate = () => {
-        this.ctx.clearRect(0, 0, this.$refs.canvas.width, this.$refs.canvas.height);
 
-        // Atualizar partículas
-        this.particles.forEach((particle, index) => {
-          // Atualizar a posição da partícula
-          particle.x += Math.cos(particle.angle) * particle.speed;
-          particle.y += Math.sin(particle.angle) * particle.speed + particle.gravity; // Simula a queda (gravidade)
-          particle.opacity -= 0.01; // Gradualmente desaparecer
+    updateSize() {
+      this.particleSize = parseFloat(this.particleSize);
+    },
 
-          // Diminuir a velocidade gradualmente para simular a dissipação
-          particle.speed *= 0.99;
+    animate() {
+      requestAnimationFrame(this.animate);
+      this.renderer.render(this.scene, this.camera);
+    },
 
-          // Desenhar a partícula
-          this.ctx.beginPath();
-          this.ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-          this.ctx.fillStyle = `rgba(255, 255, 255, ${Math.max(0, particle.opacity)})`; // Cor com opacidade
-          this.ctx.fill();
+    handleResize() {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
 
-          // Remover partículas com opacidade muito baixa ou tempo de vida expirado
-          if (particle.opacity <= 0 || particle.lifetime <= 0) {
-            this.particles.splice(index, 1);
-          } else {
-            particle.lifetime--;  // Diminuir o tempo de vida da partícula
-          }
-        });
-
-        requestAnimationFrame(animate);
-      };
-
-      animate();
+      this.camera.aspect = width / height;
+      this.camera.updateProjectionMatrix();
+      this.renderer.setSize(width, height);
     },
   },
 };
 </script>
 
 <style scoped>
-.spray-container {
+.particle-container {
   position: relative;
-  cursor: pointer;
-  display: inline-block;
-  width: 500px;
-  height: 500px;
-  border: 1px solid #ccc;
-  z-index: 3;
-}
-
-canvas {
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
-  display: block; /* Impede o canvas de ter espaços extras abaixo */
+  overflow: hidden;
+  background-color: #fff; /* Cor de fundo para simular uma tela */
 }
 </style>
